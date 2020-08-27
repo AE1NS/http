@@ -62,23 +62,25 @@ public class Http extends Plugin {
 
     @PluginMethod
     public void request(PluginCall call) {
+        boolean bindToWifi = call.getBoolean("bindToWifi", false);
+
+        if (bindToWifi) {
+            this.bind(call);
+        } else {
+            this.createRequest(call);
+        }
+    }
+
+    private void createRequest(PluginCall call) {
         String url = call.getString("url");
         String method = call.getString("method");
         JSObject headers = call.getObject("headers");
         JSObject params = call.getObject("params");
-        boolean bindToWifi = call.getBoolean("bindToWifi", false);
-
-        if (bindToWifi) {
-            this.bind();
-        }
 
         switch (method) {
             case "GET":
             case "HEAD":
                 get(call, url, method, headers, params);
-                if (bindToWifi) {
-                    this.unbind();
-                }
                 return;
             case "DELETE":
             case "PATCH":
@@ -399,7 +401,7 @@ public class Http extends Plugin {
     }
 
     @PluginMethod
-    private void bind() {
+    private void bind(final PluginCall call) {
         boolean canWriteFlag = false;
 
         if (API_VERSION >= Build.VERSION_CODES.LOLLIPOP) {
@@ -426,6 +428,7 @@ public class Http extends Plugin {
             ) {
                 final ConnectivityManager manager = (ConnectivityManager) this.context.getSystemService(Context.CONNECTIVITY_SERVICE);
                 NetworkRequest networkRequest = new NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build();
+                final Http that = this;
                 manager.requestNetwork(
                     networkRequest,
                     new ConnectivityManager.NetworkCallback() {
@@ -442,6 +445,8 @@ public class Http extends Plugin {
                                 e.printStackTrace();
                             }
                             manager.unregisterNetworkCallback(this);
+
+                            that.createRequest(call);
                         }
                     }
                 );
@@ -459,6 +464,7 @@ public class Http extends Plugin {
     }
 
     private void buildResponse(PluginCall call, HttpURLConnection conn) throws Exception {
+        boolean bindToWifi = call.getBoolean("bindToWifi", false);
         int statusCode = conn.getResponseCode();
 
         JSObject ret = new JSObject();
@@ -494,6 +500,10 @@ public class Http extends Plugin {
             }
         } else {
             ret.put("data", builder.toString());
+        }
+
+        if (bindToWifi) {
+            this.unbind();
         }
 
         call.resolve(ret);

@@ -1,7 +1,16 @@
 package com.getcapacitor.plugin.http;
 
 import android.Manifest;
+import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.Settings;
 import android.util.Log;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -16,6 +25,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.HttpCookie;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
@@ -23,6 +33,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -34,13 +45,17 @@ import org.json.JSONException;
  */
 @NativePlugin(requestCodes = { Http.HTTP_REQUEST_DOWNLOAD_WRITE_PERMISSIONS, Http.HTTP_REQUEST_UPLOAD_READ_PERMISSIONS })
 public class Http extends Plugin {
+    private static final int API_VERSION = Build.VERSION.SDK_INT;
+
     public static final int HTTP_REQUEST_DOWNLOAD_WRITE_PERMISSIONS = 9022;
     public static final int HTTP_REQUEST_UPLOAD_READ_PERMISSIONS = 9023;
 
+    Context context;
     WebkitCookieManagerProxy cookieManager;
 
     @Override
     public void load() {
+        this.context = this.bridge.getContext();
         this.cookieManager = new WebkitCookieManagerProxy(null, java.net.CookiePolicy.ACCEPT_ALL);
         java.net.CookieHandler.setDefault(cookieManager);
     }
@@ -51,11 +66,19 @@ public class Http extends Plugin {
         String method = call.getString("method");
         JSObject headers = call.getObject("headers");
         JSObject params = call.getObject("params");
+        boolean bindToWifi = call.getBoolean("bindToWifi", false);
+
+        if (bindToWifi) {
+            this.bind();
+        }
 
         switch (method) {
             case "GET":
             case "HEAD":
                 get(call, url, method, headers, params);
+                if (bindToWifi) {
+                    this.unbind();
+                }
                 return;
             case "DELETE":
             case "PATCH":
@@ -373,6 +396,66 @@ public class Http extends Plugin {
         cookieManager.removeAllCookies(null);
 
         call.resolve();
+    }
+
+    @PluginMethod
+    private void bind() {
+        boolean canWriteFlag = false;
+
+        if (API_VERSION >= Build.VERSION_CODES.LOLLIPOP) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                canWriteFlag = true;
+                // Only need ACTION_MANAGE_WRITE_SETTINGS on 6.0.0, regular permissions suffice on later versions
+            } else if (Build.VERSION.RELEASE.toString().equals("6.0.1")) {
+                canWriteFlag = true;
+                // Don't need ACTION_MANAGE_WRITE_SETTINGS on 6.0.1, if we can positively identify it treat like 7+
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // On M 6.0.0 (N+ or higher and 6.0.1 hit above), we need ACTION_MANAGE_WRITE_SETTINGS to forceWifi.
+                canWriteFlag = Settings.System.canWrite(this.context);
+                if (!canWriteFlag) {
+                    Intent intent = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS);
+                    intent.setData(Uri.parse("package:" + this.context.getPackageName()));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    this.context.startActivity(intent);
+                }
+            }
+
+            if (
+                ((API_VERSION >= Build.VERSION_CODES.M) && canWriteFlag) ||
+                ((API_VERSION >= Build.VERSION_CODES.LOLLIPOP) && !(API_VERSION >= Build.VERSION_CODES.M))
+            ) {
+                final ConnectivityManager manager = (ConnectivityManager) this.context.getSystemService(Context.CONNECTIVITY_SERVICE);
+                NetworkRequest networkRequest = new NetworkRequest.Builder().addTransportType(NetworkCapabilities.TRANSPORT_WIFI).build();
+                manager.requestNetwork(
+                    networkRequest,
+                    new ConnectivityManager.NetworkCallback() {
+
+                        @Override
+                        public void onAvailable(Network network) {
+                            if (API_VERSION >= Build.VERSION_CODES.M) {
+                                manager.bindProcessToNetwork(network);
+                            } else {
+                                //This method was deprecated in API level 23
+                                ConnectivityManager.setProcessDefaultNetwork(network);
+                            }
+                            try {} catch (Exception e) {
+                                e.printStackTrace();
+                            }
+                            manager.unregisterNetworkCallback(this);
+                        }
+                    }
+                );
+            }
+        }
+    }
+
+    private void unbind() {
+        if (API_VERSION >= Build.VERSION_CODES.M) {
+            ConnectivityManager manager = (ConnectivityManager) this.context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            manager.bindProcessToNetwork(null);
+        } else if (API_VERSION >= Build.VERSION_CODES.LOLLIPOP) {
+            ConnectivityManager.setProcessDefaultNetwork(null);
+        }
     }
 
     private void buildResponse(PluginCall call, HttpURLConnection conn) throws Exception {

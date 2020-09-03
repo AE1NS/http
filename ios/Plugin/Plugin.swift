@@ -240,7 +240,17 @@ public class CAPHttpPlugin: CAPPlugin {
     
     setRequestHeaders(&request, headers)
 
-    let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+    var urlSession = URLSession.shared
+    
+    let bindToWifi = (call.getBool("bindToWifi") ?? false)
+    if (bindToWifi) {
+      let config = URLSessionConfiguration.default
+      config.waitsForConnectivity = true
+      config.allowsCellularAccess = false
+      urlSession = URLSession(configuration: config)
+    }
+    
+    let task = urlSession.dataTask(with: request) { (data, response, error) in
       if error != nil {
         call.reject("Error", "GET", error, [:])
         return
@@ -293,8 +303,18 @@ public class CAPHttpPlugin: CAPPlugin {
         return
       }
     }
+    
+    var urlSession = URLSession.shared
+    
+    let bindToWifi = (call.getBool("bindToWifi") ?? false)
+    if (bindToWifi) {
+      let config = URLSessionConfiguration.default
+      config.waitsForConnectivity = true
+      config.allowsCellularAccess = false
+      urlSession = URLSession(configuration: config)
+    }
 
-    let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+    let task = urlSession.dataTask(with: request) { (data, response, error) in
       if error != nil {
         call.reject("Error", "MUTATE", error, [:])
         return
@@ -393,4 +413,60 @@ public class CAPHttpPlugin: CAPPlugin {
     
     return data
   }
+}
+
+class NetworkSessionManager: NSObject {
+    private var urlSession: URLSession?
+    private var config: URLSessionConfiguration = URLSessionConfiguration.default
+    private var dataTask: URLSessionDataTask?
+    private var resumeData: Data?
+    
+    var receivedData: Data?
+        
+    // Initialize the class with a delegate to send updates on.
+    override init() {
+        super.init()
+        
+        config.waitsForConnectivity = true // Key when using download tasks pipped through NEHotspotConfiguration
+        urlSession = URLSession(configuration: config, delegate: self, delegateQueue: .main)
+    }
+    
+    /**
+     * @function dataTask
+     * @param url The host url to attempt in the request.
+     * @discussion Used as a setup and kick off at data task in a session.  This acts as a test for NEHotspotConfigurationManager.
+     */
+    func dataTask(with url: String) {
+        guard let url = URL(string: url),
+            let unwrappedURLSession = urlSession else { return }
+        
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "GET"
+        let task = unwrappedURLSession.dataTask(with: urlRequest, completionHandler: { (data, response, error) in
+            if let error = error {
+                os_log("dataTask error:  %{PUBLIC}@", error.localizedDescription)
+            } else if let receivedData = data,
+                let strResponse = String(data: receivedData, encoding: .utf8) {
+                os_log("dataTask success:  %{PUBLIC}@", strResponse)
+            }
+        })
+        task.resume()
+    }
+}
+
+extension NetworkSessionManager: URLSessionDelegate {
+    /**
+     * Sent when a task cannot start the network loading process because the current
+     * network connectivity is not available or sufficient for the task's request.
+     *
+     * This delegate will be called at most one time per task, and is only called if
+     * the waitsForConnectivity property in the NSURLSessionConfiguration has been
+     * set to YES.
+     *
+     * This delegate callback will never be called for background sessions, because
+     * the waitForConnectivity property is ignored by those sessions.
+     */
+    func urlSession(_ session: URLSession, taskIsWaitingForConnectivity task: URLSessionTask) {
+        // Implemented to wait for connectivity in case the Wi-Fi connection isn't completely setup.
+    }
 }

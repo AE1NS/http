@@ -1,0 +1,13 @@
+com/getcapacitor/http/http/BuildConfig.java
+ com.getcapacitor.http.http.BuildConfig
+com/getcapacitor/plugin/http/FormUploader.java
+ com.getcapacitor.plugin.http.FormUploader
+com/getcapacitor/plugin/http/Http.java
+ com.getcapacitor.plugin.http.Http
+ com.getcapacitor.plugin.http.Http$1
+ com.getcapacitor.plugin.http.Http$2
+ com.getcapacitor.plugin.http.Http$3
+com/getcapacitor/plugin/http/FilesystemUtils.java
+ com.getcapacitor.plugin.http.FilesystemUtils
+com/getcapacitor/plugin/http/WebkitCookieManagerProxy.java
+ com.getcapacitor.plugin.http.WebkitCookieManagerProxy

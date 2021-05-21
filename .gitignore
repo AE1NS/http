@@ -1,6 +1,6 @@
 
 .idea/
-dist
+# dist
 .sourcemaps
 xcuserdata/
 node_modules/
